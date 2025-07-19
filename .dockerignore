@@ -1,17 +1,35 @@
-.bundle
-.env
-.env.*
-docker-compose.*
-docker/Dockerfile
-docker/dockerfiles
-log
-storage
-public/system
-tmp
-.codeclimate.yml
-public/packs
+# Ignora arquivos e diretórios desnecessários no build do Docker
+
+# Git
+.git
+.gitignore
+
+# Logs
+log/*
+!log/.keep
+
+# Arquivos temporários
+tmp/*
+!tmp/.keep
+
+# Dependências locais
 node_modules
 vendor/bundle
-.DS_Store
-*.swp
-*~
+
+# Arquivos de configuração local
+.env
+
+# Documentação e arquivos de desenvolvimento
+.vscode
+.idea
+.all-contributorsrc
+README.md
+CONTRIBUTING.md
+
+# Testes
+spec/
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
