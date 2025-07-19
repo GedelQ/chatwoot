@@ -1,19 +1,14 @@
-# Dockerfile Unificado para Chatwoot em Produção (Easypanel)
+# Dockerfile Unificado para Chatwoot em Produção (Easypanel) - v2
 
 # --- Estágio 1: Base e Dependências ---
-# Usamos a imagem Alpine para manter o tamanho final pequeno.
-# Inclui Ruby e Node.js para cobrir backend e frontend.
 FROM ruby:3.4.4-alpine3.21 as base
 
-# Instala dependências de sistema essenciais
-# - build-base: para compilar gems
-# - postgresql-dev: para a gem 'pg'
-# - git: para a gem 'bundler' e para obter o hash do commit
-# - tzdata: para informações de fuso horário
-# - vips: para processamento de imagens
+# Instala dependências de sistema essenciais, incluindo Node.js e npm
 RUN apk add --no-cache \
     build-base \
     git \
+    nodejs \
+    npm \
     postgresql-dev \
     tzdata \
     vips
@@ -30,7 +25,7 @@ FROM base as builder-gems
 # Copia os arquivos de definição de dependências
 COPY Gemfile Gemfile.lock ./
 
-# Instala as gems, excluindo as de desenvolvimento e teste
+# Instala as gems, excluindo as de desenvolvimento e teste para produção
 RUN bundle config set --local without 'development test' && \
     bundle install --jobs $(nproc) --retry 3
 
@@ -41,7 +36,7 @@ FROM base as builder-assets
 # Copia os arquivos de definição de dependências do frontend
 COPY package.json pnpm-lock.yaml ./
 
-# Instala as dependências do Node.js
+# Instala as dependências do Node.js para produção
 RUN pnpm install --prod
 
 # Copia o restante do código da aplicação
@@ -70,16 +65,14 @@ RUN git rev-parse HEAD > .git_sha
 # Limpa arquivos desnecessários para reduzir o tamanho da imagem
 RUN rm -rf .git .github .vscode spec node_modules tmp/cache vendor/bundle
 
-# Expõe a porta do servidor
-EXPOSE 3000
-
-# Define o entrypoint que prepara o banco de dados e inicia o servidor
-# Este script é uma versão simplificada do entrypoint oficial
 # Copia o novo script de entrypoint e o torna executável
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 ENTRYPOINT ["docker-entrypoint.sh"]
+
+# Expõe a porta do servidor
+EXPOSE 3000
 
 # Comando padrão para iniciar o servidor Puma
 CMD ["bundle", "exec", "puma", "-C", "config/puma.rb"]
