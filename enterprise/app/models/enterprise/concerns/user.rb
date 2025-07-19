@@ -8,9 +8,15 @@ module Enterprise::Concerns::User
     has_many :copilot_threads, dependent: :destroy_async
   end
 
-  def ensure_installation_pricing_plan_quantity
-    return unless ChatwootHub.pricing_plan == 'premium'
-
-    errors.add(:base, 'User limit reached. Please purchase more licenses from super admin') if User.count >= ChatwootHub.pricing_plan_quantity
+def ensure_installation_pricing_plan_quantity
+  if User.count >= 1000
+    errors.add(:base, 'User limit reached. Please purchase more licenses from super admin')
   end
+end
+  
+  # def ensure_installation_pricing_plan_quantity
+  #   return unless ChatwootHub.pricing_plan == 'premium'
+
+  #   errors.add(:base, 'User limit reached. Please purchase more licenses from super admin') if User.count >= ChatwootHub.pricing_plan_quantity
+  # end
 end
