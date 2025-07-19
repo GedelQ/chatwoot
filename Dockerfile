@@ -1,71 +1,85 @@
-# Dockerfile para Chatwoot em Produção
+# Dockerfile Unificado para Chatwoot em Produção (Easypanel)
 
-# --- Estágio 1: Builder de Assets (Frontend) ---
-# Usa uma imagem Node.js para instalar dependências e compilar os assets.
-FROM node:18-slim as builder-assets
+# --- Estágio 1: Base e Dependências ---
+# Usamos a imagem Alpine para manter o tamanho final pequeno.
+# Inclui Ruby e Node.js para cobrir backend e frontend.
+FROM ruby:3.4.4-alpine3.21 as base
 
-# Instala o pnpm, que é o gerenciador de pacotes usado pelo Chatwoot
+# Instala dependências de sistema essenciais
+# - build-base: para compilar gems
+# - postgresql-dev: para a gem 'pg'
+# - git: para a gem 'bundler' e para obter o hash do commit
+# - tzdata: para informações de fuso horário
+# - vips: para processamento de imagens
+RUN apk add --no-cache \
+    build-base \
+    git \
+    postgresql-dev \
+    tzdata \
+    vips
+
+# Instala o pnpm, o gerenciador de pacotes do Node.js usado pelo Chatwoot
 RUN npm install -g pnpm
 
 WORKDIR /app
 
-# Copia os arquivos de dependência e instala para aproveitar o cache do Docker
+# --- Estágio 2: Builder de Gems ---
+# Este estágio foca em instalar as dependências do Ruby (gems)
+FROM base as builder-gems
+
+# Copia os arquivos de definição de dependências
+COPY Gemfile Gemfile.lock ./
+
+# Instala as gems, excluindo as de desenvolvimento e teste
+RUN bundle config set --local without 'development test' && \
+    bundle install --jobs $(nproc) --retry 3
+
+# --- Estágio 3: Builder de Assets ---
+# Este estágio foca em instalar as dependências do Node.js e compilar os assets
+FROM base as builder-assets
+
+# Copia os arquivos de definição de dependências do frontend
 COPY package.json pnpm-lock.yaml ./
+
+# Instala as dependências do Node.js
 RUN pnpm install --prod
 
 # Copia o restante do código da aplicação
 COPY . .
 
-# Compila os assets do frontend com Vite
-# O comando 'bundle exec' garante que estamos usando a versão correta do vite-rails
-COPY Gemfile Gemfile.lock .ruby-version ./
-RUN bundle install && bundle exec vite:build
+# Pré-compila os assets para produção
+# A variável SECRET_KEY_BASE é necessária para o processo de compilação
+RUN SECRET_KEY_BASE=dummy bundle exec rake assets:precompile
 
+# --- Estágio 4: Imagem Final ---
+# Este é o estágio final que irá gerar a imagem de produção
+FROM base
 
-# --- Estágio 2: Builder de Gems (Backend) ---
-# Usa a imagem oficial do Ruby para instalar as gems
-FROM ruby:3.4.4-slim as builder-gems
-
-WORKDIR /app
-
-# Instala dependências de sistema necessárias para compilar gems (ex: pg, nokogiri)
-RUN apt-get update -qq && apt-get install -y --no-install-recommends build-essential libpq-dev
-
-# Copia os arquivos de dependências do Ruby
-COPY Gemfile Gemfile.lock ./
-
-# Configura o Bundler para não instalar gems de desenvolvimento e teste
-RUN bundle config set --local without 'development test'
-
-# Instala as gems
-RUN bundle install --jobs $(nproc) --retry 3
-
-
-# --- Estágio 3: Imagem Final de Produção ---
-# Começa com uma imagem Ruby limpa e leve
-FROM ruby:3.4.4-slim
-
-WORKDIR /app
-
-# Instala apenas as dependências de sistema necessárias para rodar a aplicação
-RUN apt-get update -qq && apt-get install -y --no-install-recommends libpq-dev nodejs curl && rm -rf /var/lib/apt/lists/*
-
-# Copia as gems instaladas do estágio de build de gems
+# Copia as gems instaladas do estágio builder-gems
 COPY --from=builder-gems /usr/local/bundle /usr/local/bundle
 
-# Copia os assets compilados do estágio de build de assets
+# Copia os assets compilados do estágio builder-assets
 COPY --from=builder-assets /app/public /app/public
 
 # Copia o código da aplicação
 COPY . .
 
-# Expõe a porta que o Puma (servidor de aplicação) irá usar
+# Gera um arquivo com o hash do commit para versionamento interno do Chatwoot
+RUN git rev-parse HEAD > .git_sha
+
+# Limpa arquivos desnecessários para reduzir o tamanho da imagem
+RUN rm -rf .git .github .vscode spec node_modules tmp/cache vendor/bundle
+
+# Expõe a porta do servidor
 EXPOSE 3000
 
-# Define variáveis de ambiente para produção
-ENV RAILS_ENV=production
-ENV RAILS_LOG_TO_STDOUT=true
-ENV RAILS_SERVE_STATIC_FILES=true
+# Define o entrypoint que prepara o banco de dados e inicia o servidor
+# Este script é uma versão simplificada do entrypoint oficial
+# Copia o novo script de entrypoint e o torna executável
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Comando para iniciar o servidor de aplicação
+ENTRYPOINT ["docker-entrypoint.sh"]
+
+# Comando padrão para iniciar o servidor Puma
 CMD ["bundle", "exec", "puma", "-C", "config/puma.rb"]
